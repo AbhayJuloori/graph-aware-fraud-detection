@@ -24,6 +24,8 @@ def main() -> None:
     monitor_parser = sub.add_parser("monitor", help="Evidently report and threshold alert")
     monitor_parser.add_argument("--amount-multiplier", type=float, default=1.0)
     monitor_parser.add_argument("--drift-threshold", type=float, default=0.10)
+    report_parser = sub.add_parser("report", help="dataset profile, drift sweep, figures, site data")
+    report_parser.add_argument("--raw", type=Path, default=Path(DEFAULT_RAW))
     retrain_parser = sub.add_parser("retrain", help="consume an alert after refreshed labels arrive")
     retrain_parser.add_argument("--labeled-csv", type=Path, required=True)
     retrain_parser.add_argument("--sample-fraction", type=float, default=0.10)
@@ -34,6 +36,10 @@ def main() -> None:
         result = train(args.raw, root, args.sample_fraction, args.seed, args.sample_start)
     elif args.command == "monitor":
         result = monitor(root, args.amount_multiplier, args.drift_threshold)
+    elif args.command == "report":
+        from fraud_lab.report import write_report
+
+        result = write_report(root, args.raw)
     else:
         job_path = root / "artifacts/retrain_request.json"
         if not job_path.exists():

@@ -9,6 +9,7 @@ dependencies = [
   "evidently>=0.7,<1",
   "fastapi>=0.115,<1",
   "joblib>=1.4,<2",
+  "matplotlib>=3.9,<4",
   "mlflow>=3.0,<4",
   "networkx>=3.4,<4",
   "numpy>=2.0,<3",

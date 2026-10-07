@@ -18,6 +18,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
+from fraud_lab import diagnostics
 from fraud_lab.data import chronological_split, load_paysim
 from fraud_lab.features import BASE_COLUMNS, GRAPH_COLUMNS, TemporalGraph, base_features
 
@@ -41,6 +42,7 @@ def evaluate(y: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, f
         "threshold": float(threshold),
         "positives": int(np.sum(y)),
         "rows": len(y),
+        "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
     }
 
 
@@ -106,6 +108,7 @@ def train(
         "models": {},
     }
     fitted = {}
+    test_scores_by_model: dict[str, tuple[np.ndarray, float]] = {}
     for name, (model, x_train, x_val, x_test) in candidates.items():
         with mlflow.start_run(run_name=f"{name}-seed{seed}-sample{sample_fraction}") as run:
             model.fit(x_train, labels["train"])
@@ -118,12 +121,13 @@ def train(
             }
             for split_name, metrics in model_result.items():
                 mlflow.log_metrics({f"{split_name}_{k}": v for k, v in metrics.items()
-                                    if k not in {"rows", "positives"}})
+                                    if k not in {"rows", "positives", "tp", "fp", "fn", "tn"}})
             mlflow.log_params({"candidate": name, "sample_fraction": sample_fraction,
                                "sample_start": sample_start,
                                "seed": seed, **split})
             result["models"][name] = {"run_id": run.info.run_id, **model_result}
             fitted[name] = model
+            test_scores_by_model[name] = (test_scores, threshold)
 
     validation_lift = (result["models"]["xgboost_graph"]["validation"]["pr_auc"]
                        - result["models"]["xgboost_baseline"]["validation"]["pr_auc"])
@@ -173,4 +177,28 @@ def train(
         replay.insert(1, "raw_amount", raw.amount.to_numpy())
         replay["score"] = scores
         replay.to_parquet(artifacts / f"{name}.parquet", index=False)
+
+    y_test = labels["test"]
+    diag = {
+        "models": {
+            name: {
+                "pr_curve": diagnostics.pr_curve(y_test, scores),
+                "operating_curve": diagnostics.operating_curve(y_test, scores),
+                "score_histogram": diagnostics.score_histogram(y_test, scores),
+                "per_type": diagnostics.per_type(test_data, scores, threshold),
+            }
+            for name, (scores, threshold) in test_scores_by_model.items()
+        },
+        "shap": {
+            "xgboost_baseline": diagnostics.shap_importance(
+                fitted["xgboost_baseline"], test_base, y_test, seed),
+            "xgboost_graph": diagnostics.shap_importance(
+                fitted["xgboost_graph"], test_full, y_test, seed),
+        },
+        "graph_coverage": diagnostics.graph_coverage(test_graph, y_test),
+        "examples": diagnostics.example_rows(
+            test_data, test_x, fitted[champion], test_scores_by_model[champion][1], seed),
+        "champion": champion,
+    }
+    (artifacts / "diagnostics.json").write_text(json.dumps(diag, indent=2) + "\n")
     return result

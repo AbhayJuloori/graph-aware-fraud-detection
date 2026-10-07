@@ -30,6 +30,13 @@ def test_same_step_cannot_see_siblings_or_own_label():
     assert features.loc[3, "sender_fraud_rate"] == 1.0
 
 
+def test_unsorted_input_keeps_features_on_their_own_rows():
+    ordered = TemporalGraph(snapshot_interval=100).transform(transactions(), learn_labels=True)
+    shuffled_input = transactions().iloc[[3, 1, 2, 0]]
+    shuffled = TemporalGraph(snapshot_interval=100).transform(shuffled_input, learn_labels=True)
+    pd.testing.assert_frame_equal(shuffled.loc[ordered.index], ordered)
+
+
 def test_validation_labels_do_not_update_neighbor_rate():
     graph = TemporalGraph(snapshot_interval=100)
     train = transactions().iloc[:2]

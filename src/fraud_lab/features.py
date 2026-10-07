@@ -97,6 +97,7 @@ class TemporalGraph:
 
     def transform(self, data: pd.DataFrame, learn_labels: bool = False, update_graph: bool = True) -> pd.DataFrame:
         rows: list[tuple[float, ...]] = []
+        order: list = []
         for step, batch in data.groupby("step", sort=True, observed=True):
             step = int(step)
             if step - self.snapshot_step >= self.snapshot_interval:
@@ -104,6 +105,7 @@ class TemporalGraph:
             senders = batch.nameOrig.astype(str).tolist()
             receivers = batch.nameDest.astype(str).tolist()
             rows.extend(self.row_features(sender, receiver) for sender, receiver in zip(senders, receivers))
+            order.extend(batch.index)
             if update_graph:
                 # All edges from the same step arrive after all predictions for that step.
                 self.graph.add_edges_from(zip(senders, receivers))
@@ -112,7 +114,9 @@ class TemporalGraph:
                         for node in (sender, receiver):
                             self.labeled_count[node] += 1
                             self.fraud_count[node] += int(label)
-        return pd.DataFrame(rows, index=data.index, columns=GRAPH_COLUMNS, dtype="float32")
+        # Rows come out in step order; reindex so callers may pass unsorted frames.
+        features = pd.DataFrame(rows, index=order, columns=GRAPH_COLUMNS, dtype="float32")
+        return features.reindex(data.index)
 
     def score_rows(self, data: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(

@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0b0d">
+<title>Graph-Aware Fraud Detection · Abhay Juloori</title>
+<meta name="description" content="A leakage-safe fraud detector on 6.4M PaySim transactions that tested graph features against a strict promotion gate, served the simpler winner with SHAP reason codes, and monitors drift.">
+<meta property="og:title" content="The graph idea failed. The pipeline caught it.">
+<meta property="og:description" content="Time-safe graph features, a validation promotion gate, MLflow registry, FastAPI scoring with TreeSHAP reasons, and Evidently drift monitoring.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230a0b0d'/><circle cx='10' cy='11' r='3' fill='%23c6f432'/><circle cx='22' cy='11' r='3' fill='%23c6f432'/><circle cx='16' cy='22' r='3.4' fill='%23ff5a36'/><path d='M10 11L22 11M10 11L16 22M22 11L16 22' stroke='%23c6f432' stroke-width='1.6'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=2">
+</head>
+<body data-audience="plain">
+<div class="progress" id="progress"></div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Back to top">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10 11L22 11M10 11L16 22M22 11L16 22" stroke="var(--blue)" stroke-width="1.4"/><circle cx="10" cy="11" r="3" fill="var(--blue)"/><circle cx="22" cy="11" r="3" fill="var(--blue)"/><circle cx="16" cy="22" r="3.6" fill="var(--orange)"/></svg>
+      <span class="name">Fraud Signal Lab</span><span class="live" aria-hidden="true"></span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#problem">01 Problem</a>
+      <a href="#graph">02 Graph</a>
+      <a href="#findings">03 Case files</a>
+      <a href="#how">04 Pipeline</a>
+      <a href="#trust">05 Trust</a>
+    </nav>
+    <div class="nav-right">
+      <div class="seg" role="group" aria-label="Explanation depth">
+        <button type="button" data-audience="plain" aria-pressed="true"><span class="long">Plain English</span><span class="short">Plain</span></button>
+        <button type="button" data-audience="tech" aria-pressed="false"><span class="long">Technical</span><span class="short">Tech</span></button>
+      </div>
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle dark mode">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn" href="https://github.com/AbhayJuloori/graph-aware-fraud-detection" aria-label="View source on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+        <span class="gh-label">GitHub</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+<!-- ================= HERO ================= -->
+<section class="hero">
+  <div class="stage" aria-label="Animated illustration: transfers stream between accounts. Most senders appear once and vanish, so the network stays sparse. Flagged transfers glow coral."><canvas id="net"></canvas></div>
+  <div class="stage-hud"><span>STEP <b id="hudStep">1</b> / 743</span><span>SCORED <b id="hudScored">0</b></span><span>FLAGGED <b id="hudFlagged">0</b></span></div>
+  <div class="stage-legend">
+    <span><i style="background:var(--ink-3)"></i>One time sender</span>
+    <span><i style="background:var(--blue)"></i>Repeat receiver</span>
+    <span><i style="background:var(--orange)"></i>Flagged transfer</span>
+  </div>
+  <div class="wrap hero-inner">
+    <span class="eyebrow reveal"><span class="dot"></span>Case study · fraud ML · graph features · MLOps</span>
+    <h1 class="reveal d1">The <span class="strike">graph</span> idea failed. <span class="accent">The pipeline caught it.</span></h1>
+    <p class="lede reveal d2 for-plain">I built a fraud detector for 6.4 million mobile money transfers and tested a popular idea: that linking accounts into a network exposes fraud. A strict before and after test showed the network added nothing, so the simpler model shipped. Then I built the monitoring that says when it is time to retrain.</p>
+    <p class="lede reveal d2 for-tech">PaySim, a 25% label independent cohort, whole step chronological split. Logistic regression vs XGBoost vs XGBoost + 11 leakage safe NetworkX features. Graph lift was +0.0004 test PR-AUC against a 0.01 validation gate, so the transaction only model is the MLflow champion behind a FastAPI scorer with TreeSHAP reason codes, watched by Evidently and KS drift checks.</p>
+    <div class="hero-cta reveal d3">
+      <a class="btn primary" href="#findings">Open the case files</a>
+      <a class="btn" href="#graph">How the graph works</a>
+    </div>
+  </div>
+  <div class="ticker" aria-label="Illustrative replay of scored transfers"><div class="ticker-track" id="ticker"></div></div>
+</section>
+<div class="wrap">
+    <div class="stats reveal">
+      <div class="stat"><div class="num" data-count="0.978" data-decimals="3">0</div><div class="lbl">test PR-AUC, transaction features only</div></div>
+      <div class="stat"><div class="num good" data-count="100" data-suffix="%">0%</div><div class="lbl">of test fraud caught at a 1% false alarm budget</div></div>
+      <div class="stat"><div class="num warn"><span>+</span><span data-count="0.0004" data-decimals="4">0</span></div><div class="lbl">PR-AUC added by graph features, against a +0.01 gate</div></div>
+      <div class="stat"><div class="num" data-count="99.85" data-decimals="2" data-suffix="%">0%</div><div class="lbl">of senders appear exactly once, so there is no network to mine</div></div>
+    </div>
+</div>
+
+<!-- ================= PROBLEM ================= -->
+<section class="block" id="problem">
+  <div class="wrap">
+    <div class="kicker reveal">01 / The business problem</div>
+    <h2 class="reveal">Fraud is 1 in 775 transfers. A model that always says "fine" is 99.9% accurate and useless.</h2>
+    <p class="intro reveal for-plain">Payment companies score every transfer in real time. Each alert costs an investigator's time, and every missed fraud costs real money. So the question is never "how accurate is the model". It is "how much fraud do we catch for the alerts we can afford to review", and "will it still work next month".</p>
+    <p class="intro reveal for-tech">Positives are 0.13% of rows, so accuracy and ROC-AUC flatter any model. Candidates are ranked on PR-AUC and judged at an operating point: the threshold that keeps validation false positives at or below 1%, then applied unchanged to a later test window. A graph model must beat the transaction model by 0.01 validation PR-AUC to justify its serving cost.</p>
+
+    <div class="grid-3">
+      <div class="card reveal"><div class="big">6.36M</div><h3>transfers in 31 days</h3><p>PaySim, a public simulator calibrated on a real African mobile money operator's logs. 743 hourly steps.</p></div>
+      <div class="card reveal d1"><div class="big">0.13%</div><h3>are fraud</h3><p>8,213 fraud labels, and every one is a TRANSFER or a CASH_OUT. Payments, deposits and debits are never fraud here.</p></div>
+      <div class="card reveal d2"><div class="big">3 models</div><h3>fixed before testing</h3><p>A simple baseline, a strong transaction model, and the same model plus 11 network features. Same rows, same split.</p></div>
+    </div>
+
+    <ol class="qlist reveal for-plain">
+      <li>How much fraud can we catch before investigators drown in false alarms?</li>
+      <li>Does connecting accounts into a network actually help, or does it just add cost?</li>
+      <li>Can each alert explain itself, and how do we know when the model goes stale?</li>
+    </ol>
+    <div class="math reveal for-tech">
+      rank&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;PR-AUC on validation (steps 282 to 355)<br>
+      operate&nbsp;&nbsp;&nbsp;&nbsp;τ = smallest score with FPR<sub>validation</sub>(τ) ≤ 1%, reused on test (steps &gt; 355)<br>
+      promote&nbsp;&nbsp;&nbsp;&nbsp;graph model only if PR-AUC<sub>val</sub>(graph) − PR-AUC<sub>val</sub>(transaction) ≥ 0.01<br>
+      alert&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;KS(amount) or KS(score) ≥ 0.10 with p &lt; 0.01, reference = validation window
+    </div>
+  </div>
+</section>
+
+<!-- ================= GRAPH EXPLAINER ================= -->
+<section class="block" id="graph">
+  <div class="wrap">
+    <div class="kicker reveal">02 / Inside the graph</div>
+    <h2 class="reveal">Graph features may only know <em>the past</em>. Step through how they are built.</h2>
+    <p class="intro reveal for-plain">Every transfer links a sender to a receiver. Over time, that builds a network. The idea: if a receiver already took money from a fraudster, the next transfer to it is suspicious. The catch is time. A transfer may only be scored with what was known <b>before</b> it happened, or the model cheats. Click through the steps to watch it unfold.</p>
+    <p class="intro reveal for-tech">This replays the exact rules of <code>TemporalGraph</code>: all rows in a step are scored against the graph as it stood at the end of the previous step, then that step's edges are added. Training labels update neighbor fraud rates after the step; validation and test labels never do. PageRank and weak components refresh every 168 steps.</p>
+
+    <div class="explainer">
+      <div class="floor-wrap graph-wrap reveal">
+        <div class="controls">
+          <span class="label">Time step</span>
+          <div class="seg" role="group" aria-label="Time step" id="stepSeg">
+            <button type="button" data-step="1" aria-pressed="true">1</button>
+            <button type="button" data-step="2" aria-pressed="false">2</button>
+            <button type="button" data-step="3" aria-pressed="false">3</button>
+            <button type="button" data-step="4" aria-pressed="false">4</button>
+          </div>
+          <span class="step-chip" id="stepCaption">scoring step 1</span>
+        </div>
+        <svg id="graphSvg" viewBox="0 0 640 300" role="img" aria-label="Small transfer network showing which edges are visible when each step is scored"></svg>
+        <p style="font-size:13px;margin:8px 0 0" id="stepNote"></p>
+        <table class="feat-table" aria-live="polite"><tbody id="featRows"></tbody></table>
+      </div>
+      <div class="reveal d1">
+        <ol class="steps">
+          <li><span class="n">1</span><div><h4>Score with the past only</h4><p class="for-plain">Each transfer is scored using the network as it was before this hour began. Transfers in the same hour cannot see each other.</p><p class="for-tech"><code>row_features</code> runs for every row in the step before <code>add_edges_from</code>, so siblings and the row itself are invisible.</p></div></li>
+          <li><span class="n">2</span><div><h4>Then add the new links</h4><p class="for-plain">After scoring, the hour's transfers join the network for future hours.</p><p class="for-tech">Directed edges sender→receiver; degree counts in plus out edges on the DiGraph.</p></div></li>
+          <li><span class="n">3</span><div><h4>Learn labels from training only</h4><p class="for-plain">Fraud outcomes teach the network which accounts are risky, but only for the training period. Later outcomes stay hidden, as they would in real life.</p><p class="for-tech"><code>learn_labels=True</code> only in the training window; sender and receiver fraud rates are counts over earlier labeled rows.</p></div></li>
+          <li><span class="n">4</span><div><h4>Refresh the slow features weekly</h4><p class="for-plain">Expensive network scores are recomputed once a simulated week.</p><p class="for-tech">PageRank (α 0.85) and weakly connected components every 168 steps; the serving copy is frozen at the training cutoff.</p></div></li>
+          <li><span class="n">5</span><div><h4>Most transfers look like step 4</h4><p class="for-plain">Two brand new accounts, no history, every network feature zero. In PaySim, that is nearly every sender.</p><p class="for-tech">On held-out rows, sender degree is non-zero 0.1% of the time; shared counterparties and ring flags are never non-zero.</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FINDINGS ================= -->
+<section class="block" id="findings">
+  <div class="wrap">
+    <div class="kicker reveal">03 / Case files</div>
+    <h2 class="reveal">Six findings from a held out month end the model <em>never saw</em>.</h2>
+    <p class="intro reveal">All test numbers come from the last 20% of time steps in a 25% cohort: <span id="testRows">312,885</span> transfers, <span id="testFraud">1,055</span> fraud. Thresholds were fixed on the validation window first. Hover any chart for details.</p>
+
+    <!-- F1 -->
+    <article class="finding">
+      <div class="copy reveal">
+        <span class="tag">CASE 01 <span class="stamp ">Confirmed</span></span>
+        <h3>Transaction features alone rank fraud almost perfectly.</h3>
+        <div class="metric" style="color:var(--good)"><span id="f1Auc">0.978</span><small>test PR-AUC</small></div>
+        <p class="for-plain">The tree model (XGBoost) puts nearly every fraud above nearly every normal transfer. The simple straight line model (logistic regression) cannot: it misses the "if transfer AND account emptied" combinations that trees learn easily.</p>
+        <p class="for-tech">Test PR-AUC: logistic 0.225, XGBoost transaction only 0.9785, XGBoost + graph 0.9789. Class weighted losses (<code>scale_pos_weight</code> ≈ 1,176). The curves overlap almost entirely, which is the first hint that graph features add nothing.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="chart-title">Precision vs recall on the held-out test window</div>
+        <div class="chart-sub">Up and to the right is better. Recall = share of fraud caught. Precision = share of alerts that are real fraud.</div>
+        <div class="legend"><span><i style="background:var(--ink-3)"></i>Logistic regression</span><span><i style="background:var(--blue)"></i>XGBoost, transaction only</span><span><i style="background:var(--orange)"></i>XGBoost + graph</span></div>
+        <div class="chart" id="chartPR"></div>
+      </div>
+    </article>
+
+    <!-- F2 -->
+    <article class="finding flip">
+      <div class="copy reveal">
+        <span class="tag">CASE 02 <span class="stamp info">Tradeoff</span></span>
+        <h3>Every fraud was caught. Three in four alerts were false.</h3>
+        <div class="metric"><span id="f2Prec">24%</span><small>alert precision</small></div>
+        <p class="for-plain">The 1% false alarm budget turned out generous: it caught all fraud, but most alerts were false. Drag the slider to see the tradeoff an operations team would actually choose. Tighten it to about 0.1% and you still catch about 99.9% of fraud, with far fewer wasted reviews.</p>
+        <p class="for-tech">At the validation 1% FPR threshold the test window gave recall 1.000, realized FPR 1.08%, 4,427 alerts, precision 0.238. The slider reads the test ROC curve, so it is illustrative only; a production threshold would be set on validation data with real review costs.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="planner" style="grid-template-columns:1fr">
+          <div class="slider-row">
+            <div class="slider-head"><div class="val"><span id="fprVal">1.00%</span><small>false alarm budget</small></div><span class="chip neutral" id="fprChip">chosen on validation</span></div>
+            <input type="range" id="fprSlider" min="0" max="59" step="1" value="40" aria-label="False positive rate budget">
+            <div class="ticks log" id="fprTicks"></div>
+          </div>
+        </div>
+        <div class="kpis">
+          <div><b id="kRecall">100%</b><span>of fraud caught</span></div>
+          <div><b id="kPrec">24%</b><span>of alerts are real fraud</span></div>
+          <div><b id="kAlerts">1,415</b><span>alerts per 100k transfers</span></div>
+          <div><b id="kMissed">0</b><span>fraud missed per 100k transfers</span></div>
+        </div>
+        <div class="chart" id="chartOp" style="margin-top:8px"></div>
+      </div>
+    </article>
+
+    <!-- F3 -->
+    <article class="finding">
+      <div class="copy reveal">
+        <span class="tag">CASE 03 <span class="stamp alarm">Hypothesis rejected</span></span>
+        <h3>Graph features never earned their keep.</h3>
+        <div class="metric" style="color:var(--orange)">+0.0004<small>graph lift</small></div>
+        <p class="for-plain">I tested the network idea on three separate slices of data. The result flipped between a tiny gain and a tiny loss each time. That is noise, not a signal. A network service is expensive to run in production, so the rule was set high: it must clearly win, or the simpler model ships.</p>
+        <p class="for-tech">Graph lift (graph minus transaction XGBoost PR-AUC) by cohort. E3 showed +0.0012 on validation and −0.0038 on test, which is why the absolute 0.01 validation gate exists. E4 is a disjoint row cohort and is the published confirmation. Sign flips with fewer than 210 validation positives mean no demonstrated lift.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="chart-title">Graph PR-AUC lift per cohort</div>
+        <div class="chart-sub">Bars above zero mean the graph model was better. The dashed line is the promotion gate.</div>
+        <div class="legend"><span><i style="background:var(--blue)"></i>Validation</span><span><i style="background:var(--orange)"></i>Test</span></div>
+        <div class="chart" id="chartLift"></div>
+      </div>
+    </article>
+
+    <!-- F4 -->
+    <article class="finding flip">
+      <div class="copy reveal">
+        <span class="tag">CASE 04 <span class="stamp ">Root cause</span></span>
+        <h3>Why: there is no network to find. 99.85% of senders show up once.</h3>
+        <div class="metric">0%<small>rows with a shared contact</small></div>
+        <p class="for-plain">Network features work when the same people keep showing up. In this data, almost every sender appears exactly once, and fraud receivers are almost never reused. So the "network" is mostly disconnected pairs. The only feature that fires often is "how many transfers this receiver got before", and it does not separate fraud.</p>
+        <p class="for-tech">Share of held-out rows where each graph feature is non-zero. Sender side features are dead (0.1%); triangle closure and shared counterparty features are exactly zero; receiver degree is non-zero on 42% of rows but mean SHAP is small. Across the full dataset, 0.5% of fraud receivers are reused and 0.2% ever send money, so mule chains cannot be traced.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="chart-title">How often each graph feature carries any signal (test window)</div>
+        <div class="chart-sub">Share of transfers where the feature is non-zero</div>
+        <div class="hbars" id="coverageBars"></div>
+      </div>
+    </article>
+
+    <!-- F5 -->
+    <article class="finding">
+      <div class="copy reveal">
+        <span class="tag">CASE 05 <span class="stamp ">Explained</span></span>
+        <h3>One pattern explains most fraud: the account gets emptied.</h3>
+        <div class="metric"><span id="f5Drain">97.8%</span><small>of fraud empties the account</small></div>
+        <p class="for-plain">Almost every fraud moves the sender's <b>entire balance</b> in one go. Normal customers almost never do that. The model's explanations, built with SHAP, show it leaning on exactly that ratio. Every alert from the API comes with its top three reasons, so an investigator sees why. Pick a case below.</p>
+        <p class="for-tech"><code>amount / (oldbalanceOrg + 1)</code> has mean |SHAP| 6.4 log odds, about 6× the next feature. Among legitimate TRANSFER and CASH_OUT rows, only 0.0002% drain the balance exactly. This is a generator artifact of PaySim's fraud agent, which is why scores this high do not transfer to live data. The waterfall shows the API's real reason codes: base log odds, plus the top three TreeSHAP contributions, then the remaining features.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="cases seg" role="group" aria-label="Example case" id="caseSeg"></div>
+        <div class="txn-card" id="txnCard"></div>
+        <div class="verdict" id="verdict"></div>
+        <div class="chart" id="chartWaterfall"></div>
+        <details style="margin-top:6px"><summary style="font-size:13px;color:var(--ink-2);cursor:pointer">Global view: mean |SHAP| for the graph model</summary><div class="chart" id="chartShap" style="margin-top:8px"></div></details>
+      </div>
+    </article>
+
+    <!-- F6 -->
+    <article class="finding flip">
+      <div class="copy reveal">
+        <span class="tag">CASE 06 <span class="stamp info">Alert rule</span></span>
+        <h3>The drift alarm fires when amounts rise 1.5× or fall to 0.75×.</h3>
+        <div class="metric"><span id="f6Ks">0.288</span><small>amount KS at 3×</small></div>
+        <p class="for-plain">Models go stale when the world changes. This replay takes next month's transfers and scales every amount, as if prices or customer behavior shifted. The monitor compares them with last month and raises an alarm when the difference is big enough. It also shows the cost: at 3× amounts, investigator alerts quadruple.</p>
+        <p class="for-tech">Reference = validation window; current = later test window, amounts scaled then <b>rescored</b> through the champion. Two sample KS on 20,000 row samples; alert if statistic ≥ 0.10 and p &lt; 0.01. The natural replay is healthy (0.033 / 0.010). An alert writes a retrain request that waits for mature labels instead of retraining blindly.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="planner" style="grid-template-columns:1fr">
+          <div class="slider-row">
+            <div class="slider-head"><div class="val"><span id="multVal">1.0×</span><small>replay amount multiplier</small></div><span class="chip good" id="driftChip">healthy</span></div>
+            <input type="range" id="multSlider" min="0" max="8" step="1" value="2" aria-label="Amount multiplier">
+            <div class="ticks" id="multTicks"></div>
+          </div>
+        </div>
+        <div class="kpis">
+          <div><b id="dAmt">0.033</b><span>amount KS (alert ≥ 0.10)</span></div>
+          <div><b id="dScore">0.010</b><span>score KS (alert ≥ 0.10)</span></div>
+          <div><b id="dAlerts">1,415</b><span>alerts per 100k transfers</span></div>
+          <div><b id="dJob">none</b><span>retrain job</span></div>
+        </div>
+        <div class="chart-sub" style="margin-top:12px">Transfer amount distribution, reference vs replay (log scale)</div>
+        <div class="legend"><span><i style="background:var(--ink-3)"></i>Reference (validation)</span><span><i style="background:var(--blue)"></i>Replay</span></div>
+        <div class="chart" id="chartDrift"></div>
+      </div>
+    </article>
+
+    <!-- Lesson -->
+    <article class="finding" id="lesson">
+      <div class="copy reveal">
+        <span class="tag">POST MORTEM <span class="stamp alarm">Guardrail added</span></span>
+        <h3>Two traps I would have walked into without the guardrails.</h3>
+        <p class="for-plain"><b>1. The lucky win.</b> On my first big slice of data, the network model beat the simple one on the practice exam (validation). Under the old "highest score wins" rule, it was promoted. Then it lost on the real exam (test). A tiny win on a few hundred fraud cases is luck. I added a minimum winning margin and reran on fresh rows, keeping the failed attempt in the record.</p>
+        <p class="for-tech"><b>1. Selection noise.</b> E3 registered the graph model on a +0.0012 validation edge, then lost 0.0038 on test. With 168 validation positives, PR-AUC differences of 10⁻³ are inside sampling noise. The fix: a prespecified absolute 0.01 gate, then a disjoint E4 cohort for confirmation. E3 stays in the experiment log as exploratory.</p>
+        <p class="for-plain"><b>2. The jumpy alarm.</b> Checked over the whole month, the natural data is healthy. Checked one day at a time, the same alarm fires on 5 of 17 days. Two of those days have almost no transfers, so a handful of fraud rows swing the numbers. A real monitor needs a minimum volume and a threshold tuned to its window size, or investigators learn to ignore it.</p>
+        <p class="for-tech"><b>2. Window sensitivity.</b> Daily KS (5,000 row samples) crosses 0.10 on days 3, 4, 11, 16 and 17 of the natural replay. Days 16 and 17 hold 492 and 17 rows where PaySim's tail is mostly fraud (score KS 0.999). Production alerting needs minimum volume guards, calibrated per window thresholds, and seasonality aware references.</p>
+      </div>
+      <div class="chart-card reveal d1">
+        <div class="chart-title">Daily drift on the natural, unshifted replay</div>
+        <div class="chart-sub">Larger of amount and score KS per simulated day. Orange = would alert. Hollow = under 1,000 transfers that day.</div>
+        <div class="chart" id="chartDaily"></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ================= HOW ================= -->
+<section class="block" id="how">
+  <div class="wrap">
+    <div class="kicker reveal">04 / Pipeline</div>
+    <h2 class="reveal">From a raw CSV to a monitored scoring API.</h2>
+    <p class="intro reveal for-plain">Click any step to see what it does. The top lane builds and chooses the model. The bottom lane serves it and watches it.</p>
+    <p class="intro reveal for-tech">Click a node for implementation details. Both lanes share one MLflow tracking store; serving resolves the <code>champion</code> alias, so a retrain only has to move the alias.</p>
+    <div class="pipe-wrap reveal">
+      <svg id="pipe" viewBox="0 0 1080 300" role="group" aria-label="Pipeline diagram"></svg>
+    </div>
+    <div class="node-detail card reveal" id="nodeDetail" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ================= TRUST ================= -->
+<section class="block" id="trust">
+  <div class="wrap">
+    <div class="kicker reveal">05 / Why trust it</div>
+    <h2 class="reveal">Built so it cannot cheat by <em>peeking at the future</em>.</h2>
+    <p class="intro reveal">Fraud models fail quietly when information from after the transaction leaks into training. These are the controls that keep the results honest.</p>
+    <div class="trust">
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l16 16M9.5 9.5A3 3 0 0 0 12 15a3 3 0 0 0 2.5-1.3M2 12s3.5-7 10-7c1.6 0 3 .4 4.3 1M22 12s-1.3 2.6-3.8 4.6"/></svg></div><h3>No after the fact fields</h3><p class="for-plain">PaySim includes the balance <i>after</i> each transfer and a built in fraud flag. Both reveal the answer, so neither is ever used.</p><p class="for-tech"><code>newbalanceOrig</code>, <code>newbalanceDest</code> and <code>isFlaggedFraud</code> are excluded at load time; a unit test proves changing them cannot change features.</p></div>
+      <div class="card reveal d1"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div><h3>Split by time, not at random</h3><p class="for-plain">The model learns from the first 60% of the month, is tuned on the next 20%, and is graded on the final 20%, the way it would be used.</p><p class="for-tech">Whole steps go to one window (train ≤ 281, validation 282 to 355, test &gt; 355), so no hour is split across windows.</p></div>
+      <div class="card reveal d2"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div><h3>Fresh rows to confirm</h3><p class="for-plain">The final result was rerun on a completely separate set of transfers, so the decision is not tuned to one lucky sample.</p><p class="for-tech">Seeded uniform draws; window [0.25, 0.50) is disjoint from E3's [0, 0.25). Sampling is independent of labels.</p></div>
+      <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div><h3>Failures kept on record</h3><p class="for-plain">The attempt where the network model got lucky is documented, not deleted. So is the rule change it caused.</p><p class="for-tech">The experiment log keeps E1 to E4 and M1/M2. The 0.01 gate was adopted after E3 and is disclosed as such; E4 is the only confirmatory run.</p></div>
+      <div class="card reveal d1"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l4 4L19 6"/></svg></div><h3>Bit for bit reproducible</h3><p class="for-plain">Rerunning the training from scratch gives the same numbers to six decimal places.</p><p class="for-tech">Fixed seeds through sampling, XGBoost, and SHAP sampling; a rerun reproduced every PR-AUC in <code>results.json</code> exactly.</p></div>
+      <div class="card reveal d2"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3"/></svg></div><h3>Tested on every change</h3><p class="for-plain">Automated tests check the time rules, the alarm, and the retrain queue on every commit.</p><p class="for-tech">pytest + ruff in GitHub Actions on synthetic fixtures: same step isolation, label masking, unsorted input alignment, disjoint sampling, alert queueing.</p></div>
+    </div>
+
+    <div class="limits reveal">
+      <h3 style="font-size:20px;margin-bottom:12px">Honest limits</h3>
+      <ul>
+        <li><b>PaySim is synthetic and easy.</b> Its fraud agent drains accounts in a way real fraudsters rarely make so obvious. A 0.98 PR-AUC here says nothing about live fraud rates.</li>
+        <li><b>The graph verdict is about this data.</b> Real payment networks have repeat customers, shared devices and mule accounts, where graph features often do help. The project shows how to test that claim, not that graphs never work.</li>
+        <li><b>The threshold slider reads the test window.</b> It illustrates the tradeoff; a real policy would set it on validation with actual review and loss costs.</li>
+        <li><b>NetworkX is a demo engine.</b> Production would use a streaming feature store and a graph service with freshness guarantees. See <a href="https://github.com/AbhayJuloori/graph-aware-fraud-detection/blob/main/docs/production-notes.md">production notes</a>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section class="block cta">
+  <div class="wrap">
+    <div>
+      <div class="kicker reveal">Run it</div>
+      <h2 class="reveal">Score a transfer on <em>your own laptop</em>.</h2>
+      <p class="intro reveal">The code is open source, every number on this page is reproducible, and the API returns a fraud probability with its top three reasons.</p>
+      <div class="hero-cta reveal" style="justify-content:center">
+      <a class="btn primary" href="https://github.com/AbhayJuloori/graph-aware-fraud-detection">View on GitHub</a>
+      <a class="btn" href="https://github.com/AbhayJuloori/graph-aware-fraud-detection/blob/main/docs/methodology.md">Read the methodology</a>
+      <a class="btn" href="https://github.com/AbhayJuloori/graph-aware-fraud-detection/blob/main/docs/experiment-log.md">Experiment log</a>
+    </div>
+    </div>
+    <div class="terminal reveal">
+      <div class="bar-top"><i></i><i></i><i></i><span>~/graph-aware-fraud-detection</span><button type="button" id="copyBtn">Copy</button></div>
+<pre id="cmds"><span class="c"># clone and install (PaySim CSV from Kaggle into data/raw/)</span>
+<span class="p">$</span> git clone https://github.com/AbhayJuloori/graph-aware-fraud-detection
+<span class="p">$</span> cd graph-aware-fraud-detection
+<span class="p">$</span> uv sync --python 3.12 --extra dev
+<span class="c"># train, monitor, rebuild this page's data</span>
+<span class="p">$</span> uv run fraud-lab train --sample-fraction 0.25 --sample-start 0.25
+<span class="p">$</span> uv run fraud-lab monitor --amount-multiplier 3
+<span class="p">$</span> uv run fraud-lab report
+<span class="c"># serve and explore</span>
+<span class="p">$</span> uv run uvicorn fraud_lab.api:app
+<span class="p">$</span> uv run streamlit run app.py</pre>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Built by <b>Abhay Juloori</b>. Python · XGBoost · NetworkX · MLflow · FastAPI · Evidently · Streamlit · D3</span>
+    <span>PaySim is synthetic (CC BY-SA 4.0) and is not redistributed. Results are not live fraud estimates.</span>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="app.js?v=2"></script>
+</body>
+</html>

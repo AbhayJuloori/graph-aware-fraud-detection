@@ -4,6 +4,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY app.py ./
+COPY .streamlit ./.streamlit
+COPY docs/results ./docs/results
 RUN uv sync --frozen --no-dev --no-editable
 ENV PATH="/app/.venv/bin:${PATH}" FRAUD_PROJECT_ROOT=/app FRAUD_STATE_DIR=/app/state
 EXPOSE 8000

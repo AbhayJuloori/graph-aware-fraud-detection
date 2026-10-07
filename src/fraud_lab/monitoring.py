@@ -40,6 +40,42 @@ def _ks(reference: np.ndarray, current: np.ndarray) -> dict[str, float]:
     return {"statistic": float(stat), "p_value": float(p)}
 
 
+def load_champion(root: Path):
+    """Return the registered champion model and its feature mode."""
+    mlflow.set_tracking_uri(tracking_uri(root))
+    version = MlflowClient().get_model_version_by_alias(MODEL_NAME, "champion")
+    model = mlflow.xgboost.load_model(f"models:/{MODEL_NAME}@champion")
+    return model, version.tags["feature_mode"]
+
+
+def shift_amounts(current: pd.DataFrame, multiplier: float, model, feature_mode: str) -> pd.DataFrame:
+    """Scale replayed amounts, rebuild the amount features, and rescore with the champion."""
+    current = current.copy()
+    shifted = current.raw_amount.to_numpy() * multiplier
+    current["amount"] = np.log1p(shifted)
+    current["amount_to_origin_balance"] = np.minimum(
+        shifted / (np.expm1(current.oldbalanceOrg.to_numpy()) + 1), 1_000_000)
+    current["amount_to_dest_balance"] = np.minimum(
+        shifted / (np.expm1(current.oldbalanceDest.to_numpy()) + 1), 1_000_000)
+    columns = BASE_COLUMNS + (GRAPH_COLUMNS if feature_mode == "graph" else [])
+    current["score"] = model.predict_proba(current[columns])[:, 1]
+    current["raw_amount"] = shifted
+    return current
+
+
+def drift_stats(reference: pd.DataFrame, current: pd.DataFrame,
+                drift_threshold: float = 0.10, sample: int = 20_000) -> dict:
+    """KS on capped deterministic samples; alert when either statistic is large and significant."""
+    ref_sample = reference.sample(n=min(sample, len(reference)), random_state=42)
+    cur_sample = current.sample(n=min(sample, len(current)), random_state=42)
+    amount_drift = _ks(ref_sample.raw_amount.to_numpy(), cur_sample.raw_amount.to_numpy())
+    score_drift = _ks(ref_sample.score.to_numpy(), cur_sample.score.to_numpy())
+    alert = any(d["statistic"] >= drift_threshold and d["p_value"] < 0.01
+                for d in (amount_drift, score_drift))
+    return {"amount_ks": amount_drift, "score_ks": score_drift, "alert": alert,
+            "ref_sample": ref_sample, "cur_sample": cur_sample}
+
+
 def monitor(project_root: str | Path, amount_multiplier: float = 1.0,
             drift_threshold: float = 0.10) -> dict:
     if amount_multiplier <= 0:
@@ -53,25 +89,10 @@ def monitor(project_root: str | Path, amount_multiplier: float = 1.0,
     reference = pd.read_parquet(artifacts / "reference.parquet")
     current = pd.read_parquet(artifacts / "current.parquet")
     if amount_multiplier != 1:
-        mlflow.set_tracking_uri(tracking_uri(root))
-        version = MlflowClient().get_model_version_by_alias(MODEL_NAME, "champion")
-        model = mlflow.xgboost.load_model(f"models:/{MODEL_NAME}@champion")
-        shifted = current.raw_amount.to_numpy() * amount_multiplier
-        current["amount"] = np.log1p(shifted)
-        current["amount_to_origin_balance"] = np.minimum(
-            shifted / (np.expm1(current.oldbalanceOrg.to_numpy()) + 1), 1_000_000)
-        current["amount_to_dest_balance"] = np.minimum(
-            shifted / (np.expm1(current.oldbalanceDest.to_numpy()) + 1), 1_000_000)
-        columns = BASE_COLUMNS + (GRAPH_COLUMNS if version.tags["feature_mode"] == "graph" else [])
-        current["score"] = model.predict_proba(current[columns])[:, 1]
-        current["raw_amount"] = shifted
-    # Deterministic capped samples bound the cost of the report and KS check.
-    ref_sample = reference.sample(n=min(20_000, len(reference)), random_state=42)
-    cur_sample = current.sample(n=min(20_000, len(current)), random_state=42)
-    amount_drift = _ks(ref_sample.raw_amount.to_numpy(), cur_sample.raw_amount.to_numpy())
-    score_drift = _ks(ref_sample.score.to_numpy(), cur_sample.score.to_numpy())
-    alert = any(d["statistic"] >= drift_threshold and d["p_value"] < 0.01
-                for d in (amount_drift, score_drift))
+        current = shift_amounts(current, amount_multiplier, *load_champion(root))
+    stats = drift_stats(reference, current, drift_threshold)
+    amount_drift, score_drift, alert = stats["amount_ks"], stats["score_ks"], stats["alert"]
+    ref_sample, cur_sample = stats["ref_sample"], stats["cur_sample"]
     artifacts.mkdir(exist_ok=True)
     report_status = _evidently_report(
         pd.DataFrame({"amount": ref_sample.raw_amount, "score": ref_sample.score}),

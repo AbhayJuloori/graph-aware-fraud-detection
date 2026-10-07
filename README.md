@@ -4,6 +4,8 @@
 
 A PaySim fraud experiment with time-safe graph features, an MLflow registry, a FastAPI scoring service with TreeSHAP reasons, Evidently drift reports, and a Streamlit monitor.
 
+**[Interactive project page →](https://abhayjuloori.github.io/graph-aware-fraud-detection/)** · [Methodology](docs/methodology.md) · [Experiment log](docs/experiment-log.md)
+
 > **Finding:** Graph features gave no dependable gain. On the disjoint confirmation cohort, transaction-only XGBoost reached **0.9785 test PR-AUC** and graph XGBoost **0.9789** (+0.0004); an earlier cohort showed **−0.0038** graph lift. A 0.01 absolute validation-lift gate kept the simpler model as champion. These are sampled synthetic-data results, not live fraud estimates.
 
 ## Results
@@ -19,6 +21,17 @@ The confirmation run used a **25% uniform, label-independent row cohort** of the
 Each decision threshold was chosen from validation negatives to target at most 1% false positives. The table reports what actually happened later. The graph model must beat the transaction-only model by 0.01 absolute validation PR-AUC to justify its added complexity. That gate was adopted after the first 25% cohort showed a tiny validation gain and a test loss; the disjoint second cohort is the published confirmation. Full precision is in [results.json](docs/results.json), and the [experiment log](docs/experiment-log.md) preserves both attempts.
 
 PaySim is synthetic and unusually separable. High test PR-AUC does not establish a useful live fraud policy. Validation has relatively few fraud cases, and graph lift changes sign across the two cohorts. The supported conclusion is **no demonstrated graph lift**.
+
+## Why the graph adds nothing here
+
+![Graph lift by cohort](docs/figures/graph_lift.png)
+
+- **No repeat actors.** 99.85% of senders appear exactly once. On held-out rows, sender degree is non-zero 0.1% of the time; shared counterparties and ring flags are never non-zero. Only 0.5% of fraud receivers are reused.
+- **One generator pattern dominates.** 97.8% of fraud drains the full origin balance (0.0002% of legitimate TRANSFER/CASH_OUT rows do). `amount / oldbalanceOrg` has mean |SHAP| 6.4 log odds, about 6× the next feature.
+- **Generous operating point.** The validation 1% FPR threshold catches every test fraud but only 24% of alerts are fraud; around 0.12% FPR still recovers 99.9% recall.
+- **Drift costs investigators.** The alert fires at ≤0.75× and ≥1.5× amounts; at 3× the alert volume per 100k transfers quadruples (1,415 → 5,737). Daily checks on unshifted data fire on 5 of 17 days, so a real monitor needs volume guards.
+
+<p><img src="docs/figures/pr_curves.png" width="49%" alt="Precision recall curves"> <img src="docs/figures/drift_sweep.png" width="49%" alt="Drift sweep"></p>
 
 ## Architecture
 
@@ -56,13 +69,16 @@ mkdir -p data/raw
 kaggle datasets download -d ealaxi/paysim1 -p data/raw --unzip
 uv run --no-editable fraud-lab train --sample-fraction 0.25 --sample-start 0.25
 python scripts/export_results.py
+uv run --no-editable fraud-lab report
 uv run --no-editable fraud-lab monitor
 uv run --no-editable fraud-lab monitor --amount-multiplier 3
 uv run --no-editable uvicorn fraud_lab.api:app --reload
 uv run --no-editable streamlit run app.py
 ```
 
-Open `http://localhost:8000/docs` for the API and `http://localhost:8501` for the dashboard. The [demo notebook](notebooks/demo.ipynb) reads committed aggregate results without the raw CSV. MLflow UI: `uv run mlflow ui --backend-store-uri sqlite:///$(pwd)/mlflow.db`.
+`fraud-lab report` reads the raw CSV and local artifacts and writes only aggregates: `site/data/summary.json` (the project page), `docs/results/summary.json`, and `docs/figures/*.png`. Preview the page with `python -m http.server -d site`.
+
+Open `http://localhost:8000/docs` for the API and `http://localhost:8501` for the dashboard (tabs: live monitor, hand scorer with reason codes, model evidence). The [demo notebook](notebooks/demo.ipynb) reads committed aggregate results without the raw CSV. MLflow UI: `uv run mlflow ui --backend-store-uri sqlite:///$(pwd)/mlflow.db`.
 
 ```bash
 curl -X POST http://localhost:8000/score -H 'Content-Type: application/json' \
@@ -89,6 +105,9 @@ Compose shares MLflow and artifact volumes. Its training command uses the defaul
 | `src/fraud_lab/training.py` | Three candidates, metrics, MLflow registration |
 | `src/fraud_lab/serving.py`, `api.py` | Registry-backed scoring and TreeSHAP reasons |
 | `src/fraud_lab/monitoring.py`, `app.py` | Evidently, alerts, retrain queue, Streamlit |
+| `src/fraud_lab/diagnostics.py`, `report.py` | Curves, SHAP, graph coverage, drift sweep, figures |
+| `site/` | Interactive project page (D3, GitHub Pages) |
+| `docs/methodology.md` | Full method, results, and limits |
 | `docs/results.json` | Portable aggregate measurements |
 | `docs/experiment-log.md` | Rehearsal, failed graph inference, confirmation |
 | `docs/production-notes.md` | What I would change in production |
