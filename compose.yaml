@@ -1,0 +1,23 @@
+services:
+  train:
+    build: .
+    command: ["fraud-lab", "train", "--raw", "data/raw/PS_20174392719_1491204439457_log.csv"]
+    volumes: &shared
+      - ./data/raw:/app/data/raw:ro
+      - fraud_artifacts:/app/artifacts
+      - fraud_runs:/app/mlruns
+      - fraud_state:/app/state
+  api:
+    build: .
+    ports: ["8000:8000"]
+    volumes: *shared
+  dashboard:
+    build: .
+    command: ["streamlit", "run", "app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    ports: ["8501:8501"]
+    volumes: *shared
+
+volumes:
+  fraud_artifacts:
+  fraud_runs:
+  fraud_state:

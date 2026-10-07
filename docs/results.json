@@ -1,0 +1,120 @@
+{
+  "dataset": "ealaxi/paysim1",
+  "sample_fraction": 0.25,
+  "sample_start": 0.25,
+  "seed": 42,
+  "sampling": "uniform random rows, independent of labels, then chronological split by whole step",
+  "split": {
+    "train_end_step": 281,
+    "validation_end_step": 355
+  },
+  "counts": {
+    "train": {
+      "rows": 955801,
+      "fraud": 812
+    },
+    "validation": {
+      "rows": 323099,
+      "fraud": 208
+    },
+    "test": {
+      "rows": 312885,
+      "fraud": 1055
+    }
+  },
+  "excluded_columns": [
+    "newbalanceOrig",
+    "newbalanceDest",
+    "isFlaggedFraud"
+  ],
+  "graph_pr_auc_lift_validation": -0.002026803724540449,
+  "graph_pr_auc_lift_test": 0.00038399760612173317,
+  "graph_promotion_margin": 0.01,
+  "features": {
+    "base": [
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "amount_to_origin_balance",
+      "amount_to_dest_balance",
+      "hour_sin",
+      "hour_cos",
+      "dest_is_merchant",
+      "type_CASH_IN",
+      "type_CASH_OUT",
+      "type_DEBIT",
+      "type_PAYMENT",
+      "type_TRANSFER"
+    ],
+    "graph": [
+      "sender_degree",
+      "receiver_degree",
+      "sender_pagerank",
+      "receiver_pagerank",
+      "shared_counterparties",
+      "ring_flag",
+      "same_component_flag",
+      "sender_component_size",
+      "receiver_component_size",
+      "sender_fraud_rate",
+      "receiver_fraud_rate"
+    ]
+  },
+  "models": {
+    "logistic_baseline": {
+      "validation": {
+        "pr_auc": 0.06594940741997071,
+        "recall_at_validation_1pct_fpr": 0.6442307692307693,
+        "realized_fpr": 0.010000278731832105,
+        "threshold": 0.9436523914337158,
+        "positives": 208,
+        "rows": 323099
+      },
+      "test": {
+        "pr_auc": 0.22509112112755253,
+        "recall_at_validation_1pct_fpr": 0.6170616113744076,
+        "realized_fpr": 0.011262546900554789,
+        "threshold": 0.9436523914337158,
+        "positives": 1055,
+        "rows": 312885
+      }
+    },
+    "xgboost_baseline": {
+      "validation": {
+        "pr_auc": 0.9366921898534538,
+        "recall_at_validation_1pct_fpr": 1.0,
+        "realized_fpr": 0.010000278731832105,
+        "threshold": 0.0003554703143890947,
+        "positives": 208,
+        "rows": 323099
+      },
+      "test": {
+        "pr_auc": 0.9784668072768408,
+        "recall_at_validation_1pct_fpr": 1.0,
+        "realized_fpr": 0.010813584324792356,
+        "threshold": 0.0003554703143890947,
+        "positives": 1055,
+        "rows": 312885
+      }
+    },
+    "xgboost_graph": {
+      "validation": {
+        "pr_auc": 0.9346653861289134,
+        "recall_at_validation_1pct_fpr": 1.0,
+        "realized_fpr": 0.010000278731832105,
+        "threshold": 0.0003563073114491999,
+        "positives": 208,
+        "rows": 323099
+      },
+      "test": {
+        "pr_auc": 0.9788508048829625,
+        "recall_at_validation_1pct_fpr": 1.0,
+        "realized_fpr": 0.011974473270692364,
+        "threshold": 0.0003563073114491999,
+        "positives": 1055,
+        "rows": 312885
+      }
+    }
+  },
+  "selected_on_validation": "base"
+}

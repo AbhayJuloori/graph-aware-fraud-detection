@@ -1,0 +1,41 @@
+[project]
+name = "graph-aware-fraud-detection"
+version = "0.1.0"
+description = "Leakage-aware PaySim fraud detection with graph features, model registry, API, and drift monitoring"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "evidently>=0.7,<1",
+  "fastapi>=0.115,<1",
+  "joblib>=1.4,<2",
+  "mlflow>=3.0,<4",
+  "networkx>=3.4,<4",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<3",
+  "scikit-learn>=1.5,<2",
+  "streamlit>=1.39,<2",
+  "uvicorn>=0.30,<1",
+  "xgboost>=2.1,<4",
+]
+
+[project.optional-dependencies]
+dev = ["httpx>=0.27,<1", "pytest>=8.3,<9", "ruff>=0.7,<1"]
+
+[project.scripts]
+fraud-lab = "fraud_lab.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fraud_lab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
